@@ -1,4 +1,6 @@
 #import "PMPlugin.h"
+#include <Foundation/Foundation.h>
+#include <objc/objc.h>
 #import "PMConvertUtils.h"
 #import "PMAssetPathEntity.h"
 #import "PMLogUtils.h"
@@ -8,28 +10,47 @@
 #import "PMThumbLoadOption.h"
 #import "PMProgressHandler.h"
 #import "PMConverter.h"
+#import <FirebaseCrashlytics/FirebaseCrashlytics.h>
 
 #import <PhotosUI/PhotosUI.h>
 
 @implementation PMPlugin {
     BOOL ignoreCheckPermission;
     NSObject <FlutterPluginRegistrar> *privateRegistrar;
+    FlutterMethodChannel* channel;
+    NSMutableArray* progressHandlerDisposeCallbacks;
+    volatile BOOL isDetach;
 }
 
 - (void)registerPlugin:(NSObject <FlutterPluginRegistrar> *)registrar {
     privateRegistrar = registrar;
     [self initNotificationManager:registrar];
 
-    FlutterMethodChannel *channel =
-        [FlutterMethodChannel methodChannelWithName:@"com.fluttercandies/photo_manager"
+    channel = [FlutterMethodChannel methodChannelWithName:@"com.fluttercandies/photo_manager"
                                     binaryMessenger:[registrar messenger]];
+
     PMManager *manager = [PMManager new];
     manager.converter = [PMConverter new];
     [self setManager:manager];
     [channel
         setMethodCallHandler:^(FlutterMethodCall *call, FlutterResult result) {
-          [self onMethodCall:call result:result];
+            [self onMethodCall:call result:result];
         }];
+
+    progressHandlerDisposeCallbacks = [[NSMutableArray alloc] init];
+    isDetach = NO;
+}
+
+- (void)applicationWillTerminate:(NSNotification *)notification {
+    isDetach = YES;
+    [channel setMethodCallHandler:nil];
+    [self.notificationManager detachFromEngine];
+    for(void (^callback)(void) in progressHandlerDisposeCallbacks) {
+        callback();
+    }
+
+    NSLog([NSString stringWithFormat:@"PhotoManager terminate %@", [NSThread currentThread]]);
+    [[FIRCrashlytics crashlytics] log: [NSString stringWithFormat:@"PhotoManager terminate %@", [NSThread currentThread]]];
 }
 
 - (void)initNotificationManager:(NSObject <FlutterPluginRegistrar> *)registrar {
@@ -37,6 +58,10 @@
 }
 
 - (void)onMethodCall:(FlutterMethodCall *)call result:(FlutterResult)result {
+    if (isDetach) {
+        return;
+    }
+
     ResultHandler *handler = [ResultHandler handlerWithResult:result];
     PMManager *manager = self.manager;
 
@@ -556,6 +581,11 @@
     }
     int index = [progressIndex intValue];
     PMProgressHandler *handler = [PMProgressHandler new];
+
+    [progressHandlerDisposeCallbacks addObject:^() {
+        [handler deinit]; 
+    }];
+
     [handler register:privateRegistrar channelIndex:index];
 
     return handler;

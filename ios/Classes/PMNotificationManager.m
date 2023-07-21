@@ -1,6 +1,8 @@
 #import "PMNotificationManager.h"
+#include <objc/objc.h>
 #import "PMConvertUtils.h"
 #import "core/PMLogUtils.h"
+#import <FirebaseCrashlytics/FirebaseCrashlytics.h>
 
 @interface PMNotificationManager () <PHPhotoLibraryChangeObserver>
 @end
@@ -9,6 +11,7 @@
     FlutterMethodChannel *channel;
     BOOL _notifying;
     PHFetchResult<PHAsset *> *result;
+    volatile BOOL isDetach;
 }
 
 - (instancetype)initWithRegistrar:
@@ -21,8 +24,20 @@
                    binaryMessenger:[registrar messenger]];
         _notifying = NO;
     }
+
+    isDetach = NO;
     
     return self;
+}
+
+- (void)detachFromEngine {
+    NSString *thread = [NSString stringWithFormat:@"detachFromEngine %@", [NSThread currentThread]];
+    [[FIRCrashlytics crashlytics] log: thread];
+    isDetach = YES;
+    if (_notifying) {
+        [self stopNotify];
+    }
+    [channel setMethodCallHandler:nil];
 }
 
 + (instancetype)managerWithRegistrar:(NSObject<FlutterPluginRegistrar> *)registrar {
@@ -30,6 +45,10 @@
 }
 
 - (void)startNotify {
+    if (isDetach) {
+        return;
+    }
+
     PHPhotoLibrary *library = PHPhotoLibrary.sharedPhotoLibrary;
     [library registerChangeObserver:self];
     _notifying = YES;
@@ -45,7 +64,10 @@
 #pragma "photo library notify"
 
 - (void)photoLibraryDidChange:(PHChange *)changeInstance {
-    if (!result) {
+    [[FIRCrashlytics crashlytics] log: [NSString stringWithFormat:@"photoLibraryDidChange %@", [NSThread currentThread]]];
+
+    if (!result || isDetach) {
+        [[FIRCrashlytics crashlytics] log: [NSString stringWithFormat:@"photoLibraryDidChange is detach %@", [NSThread currentThread]]];
         return;
     }
     PHFetchResultChangeDetails *details = [changeInstance changeDetailsForFetchResult:result];
@@ -61,10 +83,21 @@
     
     [PMLogUtils.sharedInstance
      info:[NSString stringWithFormat:@"on change result = %@", detailResult]];
+
+    if (isDetach) {
+        [[FIRCrashlytics crashlytics] log: [NSString stringWithFormat:@"photoLibraryDidChange is detach before calling invoke method %@", [NSThread currentThread]]];
+        return;
+    }
+
+    [[FIRCrashlytics crashlytics] log: [NSString stringWithFormat:@"photoLibraryDidChange call invoke method %@", [NSThread currentThread]]];
     [channel invokeMethod:@"change" arguments:detailResult];
 }
 
 - (void)refreshFetchResult {
+    if (isDetach) {
+        return;
+    }
+    
     result = [self getLastAssets];
 }
 

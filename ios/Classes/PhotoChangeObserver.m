@@ -1,4 +1,5 @@
 #import <Photos/Photos.h>
+#include <objc/objc.h>
 #import "PhotoChangeObserver.h"
 #import "core/PMLogUtils.h"
 
@@ -8,8 +9,7 @@
 @end
 
 @implementation PhotoChangeObserver {
-    
-    
+    volatile BOOL isDetach;
 }
 
 - (void)initWithRegister:(NSObject <FlutterPluginRegistrar> *)registrar {
@@ -19,9 +19,21 @@
     self.isInit = YES;
     self.handler = [FlutterMethodChannel methodChannelWithName:@"photo_manager/notify" binaryMessenger:[registrar messenger]];
     [PHPhotoLibrary.sharedPhotoLibrary registerChangeObserver:self];
+
+    isDetach = NO;
+}
+
+- (void)detachFromEngine {
+    isDetach = YES;
+    [PHPhotoLibrary.sharedPhotoLibrary unregisterChangeObserver:self];
+    [self.handler setMethodCallHandler:nil];
 }
 
 - (void)photoLibraryDidChange:(PHChange *)changeInstance {
+    if (isDetach) {
+        return;
+    }
+    
     PHAssetCollection *collection = [self getRecentCollection];
     if (!collection) {
         [self.handler invokeMethod:@"change" arguments:@1];
