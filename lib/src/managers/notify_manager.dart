@@ -13,6 +13,7 @@ import '../internal/plugin.dart';
 /// The notify manager when assets changed.
 class NotifyManager {
   static const _channel = MethodChannel('${PMConstants.channelPrefix}/notify');
+  static bool notified = false;
 
   Stream<bool> get notifyStream => _controller.stream;
   final _controller = StreamController<bool>.broadcast();
@@ -61,7 +62,15 @@ class NotifyManager {
 
   Future<dynamic> _notify(MethodCall call) async {
     if (call.method == 'change') {
-      _onChange(call);
+      if (notified) {
+        return;
+      }
+
+      notified = true;
+      Future.delayed(const Duration(milliseconds: 1500)).then((_) {
+        _onChange(call);
+        notified = false;
+      });
     } else if (call.method == 'setAndroidQExperimental') {
       // PhotoManager.androidQExperimental = call.arguments["open"];
     }
